@@ -1,0 +1,31 @@
+[project]
+name = "img2softmesh"
+version = "0.1.0"
+description = "Photo of a household textile -> simulation-ready, textured soft (cloth) mesh + MuJoCo scene."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2",
+    "opencv-python-headless",
+    "triangle",
+    "mujoco>=3.3",
+]
+
+[project.optional-dependencies]
+# Better background removal (U^2-Net / BiRefNet via onnxruntime, CPU). Downloads a model on first use.
+rembg = ["rembg[cpu]"]
+# --geometry trellis: TRELLIS.2 (Q4 GGUF) via the trellis.cpp binary, fetched on first use.
+trellis = ["trimesh", "pillow", "scipy"]
+
+[project.scripts]
+img2softmesh = "img2softmesh.cli:main"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "UP"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
