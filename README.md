@@ -1,7 +1,14 @@
-# img2softmesh
+<div align="center">
 
-Turn a photo of a household textile (t-shirt, towel, sock, blanket…) into a textured,
-simulation-ready soft cloth mesh.
+<img src="docs/media/logo.svg" alt="img2softmesh" width="460">
+
+Turn a photo of cloth into a textured, simulation-ready soft mesh.
+
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![GPU optional](https://img.shields.io/badge/GPU-optional-lightgrey)
+
+</div>
 
 ```mermaid
 flowchart LR

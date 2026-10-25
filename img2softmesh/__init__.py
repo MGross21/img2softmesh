@@ -1,4 +1,4 @@
-"""Photo of a household textile -> simulation-ready, textured soft mesh."""
+"""Photo of cloth -> textured, simulation-ready soft mesh."""
 
 from .pipeline import build
 

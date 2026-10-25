@@ -1,9 +1,29 @@
 [project]
 name = "img2softmesh"
 version = "0.1.0"
-description = "Photo of a household textile -> simulation-ready, textured soft (cloth) mesh + MuJoCo scene."
+description = "Photo of cloth -> textured, simulation-ready soft mesh."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael Gross" }]
+keywords = [
+    "cloth", "cloth-simulation", "soft-body", "deformable", "textile", "mesh",
+    "3d-reconstruction", "image-to-3d", "robotics", "mujoco", "trellis",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
 dependencies = [
     "numpy>=2",
     "opencv-python-headless",
@@ -19,6 +39,11 @@ trellis = ["trimesh", "pillow", "scipy"]
 
 [project.scripts]
 img2softmesh = "img2softmesh.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/MGross21/img2softmesh"
+Repository = "https://github.com/MGross21/img2softmesh"
+Issues = "https://github.com/MGross21/img2softmesh/issues"
 
 [tool.ruff]
 line-length = 120
