@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MEDIA = ROOT / "docs" / "media"
 # output folder -> example input
 EXAMPLES = {
-    "tshirt_trellis": "tshirt",
     "tshirt": "tshirt",
-    "redtee": "redtee",
     "sock": "sock",
     "towel": "towel",
     "blanket": "blanket",
