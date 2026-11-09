@@ -5,22 +5,6 @@ import numpy as np
 import triangle
 
 
-def _smooth_closed(c, k):
-    if k < 1:
-        return c
-    kern = np.ones(2 * k + 1) / (2 * k + 1)
-    pad = np.vstack([c[-k:], c, c[:k]])
-    return np.stack([np.convolve(pad[:, i], kern, "valid") for i in range(2)], 1)
-
-
-def _resample_closed(c, step):
-    closed = np.vstack([c, c[:1]])
-    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(closed, axis=0), axis=1))])
-    n = max(12, round(s[-1] / step))
-    t = np.linspace(0, s[-1], n, endpoint=False)
-    return np.stack([np.interp(t, s, closed[:, 0]), np.interp(t, s, closed[:, 1])], 1)
-
-
 def sample(img, pts):
     h, w = img.shape[:2]
     x = np.clip(np.rint(pts[:, 0]).astype(int), 0, w - 1)
@@ -28,15 +12,11 @@ def sample(img, pts):
     return img[y, x]
 
 
-def boundary_edges(tris):
-    e = np.sort(np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]), axis=1)
-    uniq, cnt = np.unique(e, axis=0, return_counts=True)
-    return uniq[cnt == 1]
-
-
 def boundary_mask(n, tris):
+    """Vertices on the open boundary (edges used by a single triangle)."""
+    e, cnt = np.unique(np.sort(tris[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1), axis=0, return_counts=True)
     b = np.zeros(n, bool)
-    b[boundary_edges(tris).ravel()] = True
+    b[e[cnt == 1].ravel()] = True
     return b
 
 
@@ -48,7 +28,13 @@ def silhouette_mesh(mask, n_target):
     h = np.sqrt(np.count_nonzero(mask) / (n_target * np.sqrt(3) / 2))  # edge length of the target lattice
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     c = max(cnts, key=cv2.contourArea)[:, 0, :].astype(np.float64)
-    boundary = _resample_closed(_smooth_closed(c, max(1, int(h / 4))), h)
+    k = max(1, int(h / 4))  # closed moving average smooths the pixel stairs
+    kern = np.ones(2 * k + 1) / (2 * k + 1)
+    c = np.stack([np.convolve(x, kern, "valid") for x in np.pad(c, ((k, k), (0, 0)), "wrap").T], 1)
+    c = np.vstack([c, c[:1]])  # resample the closed outline at spacing h
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(c, axis=0), axis=1))]
+    t = np.linspace(0, s[-1], max(12, round(s[-1] / h)), endpoint=False)
+    boundary = np.column_stack([np.interp(t, s, c[:, 0]), np.interp(t, s, c[:, 1])])
     seg = np.column_stack([np.arange(len(boundary)), np.roll(np.arange(len(boundary)), -1)])
     # p: respect the outline, q30: min angle 30deg, a: max triangle area (refined triangles average ~1/1.7
     # of the cap, so the cap is 1.7x an equilateral triangle of side h),

@@ -30,13 +30,14 @@ flowchart LR
 ## Quick start
 
 ```bash
-uv sync --extra rembg --extra trellis
+uv sync --extra u2net --extra trellis
 uv run img2softmesh demo examples/tshirt.jpg --kind tshirt
 ```
 
 ```bash
 img2softmesh make photo.jpg --kind towel     # mesh + texture in out/photo/
 img2softmesh make photo.jpg -g trellis       # use TRELLIS.2 for 3D shape
+img2softmesh make photo.jpg --crease 0.05    # sharp bends stay in as creases
 img2softmesh sim out/photo                   # run the demo
 ```
 

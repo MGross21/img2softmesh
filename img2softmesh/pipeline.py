@@ -17,7 +17,7 @@ TABLE_H = 0.5
 
 
 def build(image, kind="auto", size=None, verts=None, radius=None, segment_method="auto", geometry="silhouette",
-          out_dir=None, max_texture=2048, selfcollide="none", trellis_res=512):
+          out_dir=None, max_texture=2048, selfcollide="none", crease=None, trellis_res=512):
     """Run the full pipeline. Returns a dict describing the outputs.
 
     geometry: "silhouette" -- flat/two-layer mesh from the outline, texture = photo pixels (fast, CPU)
@@ -36,17 +36,19 @@ def build(image, kind="auto", size=None, verts=None, radius=None, segment_method
         kind = "towel" if rect is not None else "garment"
     if kind not in PRESETS:
         raise ValueError(f"unknown kind {kind!r}; choose from: auto, {', '.join(PRESETS)}")
-    p = PRESETS[kind] if radius is None else replace(PRESETS[kind], radius=radius)
+    p = PRESETS[kind]
+    p = replace(p, radius=p.radius if radius is None else radius, crease=p.crease if crease is None else crease)
     rectified = p.layers == 1 and rect is not None
     if rectified:
         bgr, mask = rect
 
-    if geometry == "silhouette":
-        m = _silhouette(out, bgr, mask, p, size, verts)
-    elif geometry == "trellis":
-        m = _trellis(out, bgr, mask, p, size, verts, trellis_res)
-    else:
-        raise ValueError(f"unknown geometry backend {geometry!r}")
+    match geometry:
+        case "silhouette":
+            m = _silhouette(out, bgr, mask, p, size, verts)
+        case "trellis":
+            m = _trellis(out, bgr, mask, p, size, verts, trellis_res)
+        case _:
+            raise ValueError(f"unknown geometry backend {geometry!r}")
 
     v3 = m["verts"]
     mass = m["area"] * p.density * p.layers
@@ -54,8 +56,9 @@ def build(image, kind="auto", size=None, verts=None, radius=None, segment_method
     grasp = _grasp_patches(v3, m["top"], m["edge"], p.grasp)
     ext = np.abs(v3[:, :2]).max(0)
     write_scene(out / "scene.xml", name=image.stem, kind=kind, preset=p, mass=mass,
-                table=(ext[0] * 1.3 + 0.1, ext[1] * 1.3 + 0.1, TABLE_H / 2),
-                grippers=[(v3[g[0]], g) for g in grasp], selfcollide=selfcollide)
+                table=(ext[0] * 1.3 + 0.1, ext[1] * 1.3 + 0.1, TABLE_H / 2), verts=v3, tris=m["tris"], uv=m["uv"],
+                back=m["back"], back_texture=m.get("back_texture"), grippers=[(v3[g[0]], g) for g in grasp],
+                selfcollide=selfcollide)
 
     info = dict(image=str(image), kind=kind, geometry=geometry, preset=asdict(p), rectified=rectified,
                 vertices=len(v3), triangles=len(m["tris"]), size_m=(2 * ext).tolist(),
@@ -101,7 +104,6 @@ def _outline(mask, p, size, verts):
 
 
 def _silhouette(out, bgr, mask, p, size, verts):
-    from .shell import layer_skin, slab_skin, write_skn
     o = _outline(mask, p, size, verts)
     pts, is_back, radius = o["pts"], o["is_back"], p.radius
 
@@ -112,24 +114,17 @@ def _silhouette(out, bgr, mask, p, size, verts):
 
     z0 = TABLE_H + 0.02 + (puff.max() if p.layers == 2 else radius)
     v3 = np.column_stack([o["xy"], z0 + z_layer])
-    # render: skin with visible thickness. Two layers: front | back atlas, the back shows the photo mirrored
-    tex = bleed(bgr, mask)
-    if p.layers == 2:
-        tex = np.hstack([tex, tex])
-        skin = layer_skin(pts, o["tris"], is_back, v3, mask.shape)
-    else:
-        skin = slab_skin(pts, o["tris"], v3, mask.shape)
-    cv2.imwrite(str(out / "texture.png"), tex)
-    write_skn(out / "cloth.skn", *skin, v3)
-    h, w = mask.shape
-    uv = np.stack([pts[:, 0] / (w * p.layers), 1 - pts[:, 1] / h], 1)  # obj (v up), front of the texture
+    # render: the flex itself, photo texture on both sides (the back reads mirrored, like the reverse of a cloth)
+    cv2.imwrite(str(out / "texture.png"), bleed(bgr, mask))
+    uv = pts / mask.shape[::-1]  # per-vertex texcoords into the photo-aligned texture
     write_obj(out / "cloth.obj", v3, o["tris"], uv)
-    return dict(verts=v3, tris=o["tris"], edge=o["edge"], area=o["area"], top=~is_back)
+    return dict(verts=v3, tris=o["tris"], uv=uv, back=is_back[o["tris"]].any(1), edge=o["edge"], area=o["area"],
+                top=~is_back)
 
 
 def _trellis(out, bgr, mask, p, size, verts, res):
     from . import trellis
-    from .shell import back_view, layer_skin, load_glb, rasterize, write_skn
+    from .shell import back_view, load_glb, rasterize
 
     cv2.imwrite(str(out / "cutout.png"), np.dstack([bgr, mask]))
     glb = trellis.generate(out / "cutout.png", out / "trellis.glb", res=res)
@@ -160,10 +155,12 @@ def _trellis(out, bgr, mask, p, size, verts, res):
     sv = np.column_stack([o["xy"], base + z])
     sv[:, 2] += max(0.0, base + p.radius - sv[:, 2].min())  # nothing starts inside the table
 
-    # render: photo on the front, the generated underside on the back
+    # render: photo on the front, the generated underside on the back (same uv, per-element material)
     gen_tex = np.ascontiguousarray(np.asarray(img.convert("RGB"))[:, :, ::-1])
     back = back_view(p2, ruv, rf, gen_tex, bot_ids, bgr, mask)
-    cv2.imwrite(str(out / "texture.png"), np.hstack([bleed(bgr, mask), bleed(back, mask)]))
-    write_skn(out / "cloth.skn", *layer_skin(pts, tris, is_back, sv, mask.shape), sv)
-    write_obj(out / "cloth.obj", sv, tris)
-    return dict(verts=sv, tris=tris, edge=o["edge"], area=o["area"], top=~is_back)
+    cv2.imwrite(str(out / "texture.png"), bleed(bgr, mask))
+    cv2.imwrite(str(out / "texture_back.png"), bleed(back, mask))
+    uv = pts / mask.shape[::-1]
+    write_obj(out / "cloth.obj", sv, tris, uv)
+    return dict(verts=sv, tris=tris, uv=uv, back=is_back[tris].any(1), back_texture="texture_back.png",
+                edge=o["edge"], area=o["area"], top=~is_back)

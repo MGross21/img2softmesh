@@ -1,12 +1,10 @@
-"""Render skins over the cloth, and generated 3D asset (GLB) -> shape + back-side texture.
+"""Generated 3D asset (GLB) -> shape + back-side texture.
 
-Generated meshes are rarely manifold, so they are never simulated or skinned directly. Instead:
+Generated meshes are rarely manifold, so they are never simulated or drawn directly. Instead:
   physics: the clean silhouette cloth mesh, lifted onto the asset's top/bottom surfaces (MuJoCo flex)
-  render:  that same mesh as a MuJoCo <skin> with an atlas: photo on the front, the asset seen from
-           below on the back (seam vertices are duplicated so each side keeps its own UVs)
+  render:  that same mesh, photo-aligned uv on both layers: the front layer shows the photo, the back
+           layer the asset seen from below (one skin per layer)
 """
-
-import struct
 
 import cv2
 import numpy as np
@@ -72,56 +70,3 @@ def _match_color(img, used, photo, mask):
     src = t[used]
     t = (t - src.mean(0)) / (src.std(0) + 1e-6) * p.std(0) + p.mean(0)
     return cv2.cvtColor(np.clip(t, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
-
-
-def layer_skin(pts, tris, is_back, verts, shape):
-    """Skin over the two-layer cloth with a side-by-side atlas (front | back).
-
-    Returns (skin verts, uv, faces, bone per skin vertex). Seam vertices appear twice, once per side.
-    """
-    h, w = shape
-    front = np.flatnonzero(~is_back)
-    back_tris = is_back[tris].any(1)
-    seam = np.unique(tris[back_tris][~is_back[tris[back_tris]]])
-    back = np.r_[np.flatnonzero(is_back), seam]
-    bone = np.r_[front, back]
-    uv = np.r_[np.column_stack([pts[front, 0] / (2 * w), pts[front, 1] / h]),
-               np.column_stack([0.5 + pts[back, 0] / (2 * w), pts[back, 1] / h])]
-    fmap = np.full(len(pts), -1)
-    fmap[front] = np.arange(len(front))
-    bmap = np.full(len(pts), -1)
-    bmap[back] = len(front) + np.arange(len(back))
-    faces = np.where(back_tris[:, None], bmap[tris], fmap[tris])
-    return verts[bone], uv, faces, bone
-
-
-def slab_skin(pts, tris, verts, shape):
-    """Skin over a single-layer cloth: front, back copy and rim. Skin inflate pushes the sides apart
-    along their normals, so the cloth renders as a slab as thick as its contact shell.
-
-    Both sides use the photo uv (the back reads mirrored, like the reverse of a woven cloth).
-    """
-    n, (h, w) = len(pts), shape
-    e = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
-    a, b = e[~np.isin(e[:, 0] * n + e[:, 1], e[:, 1] * n + e[:, 0])].T  # outline edges, CCW
-    faces = np.vstack([tris, tris[:, ::-1] + n, np.column_stack([a, a + n, b + n]), np.column_stack([a, b + n, b])])
-    uv = np.tile(pts / [w, h], (2, 1))
-    return np.vstack([verts, verts]), uv, faces, np.tile(np.arange(n), 2)
-
-
-def write_skn(path, verts, uv, faces, bone, bind_pos, body_prefix="cloth_"):
-    """MuJoCo binary skin; skin vertex i follows sim vertex body bone[i] rigidly (uv: v down)."""
-    order = np.argsort(bone, kind="stable")
-    starts = np.searchsorted(bone[order], np.arange(len(bind_pos) + 1))
-    used = [b for b in range(len(bind_pos)) if starts[b + 1] > starts[b]]  # MuJoCo rejects empty bones
-    out = [struct.pack("4i", len(verts), len(uv), len(faces), len(used)),
-           verts.astype("<f4").tobytes(), uv.astype("<f4").tobytes(), faces.astype("<i4").tobytes()]
-    for b in used:
-        ids = order[starts[b]:starts[b + 1]]
-        out.append(f"{body_prefix}{b}".encode().ljust(40, b"\0"))
-        out.append(struct.pack("<3f4f", *bind_pos[b], 1, 0, 0, 0))
-        out.append(struct.pack("<i", len(ids)))
-        out.append(ids.astype("<i4").tobytes())
-        out.append(np.ones(len(ids), "<f4").tobytes())
-    with open(path, "wb") as fh:
-        fh.write(b"".join(out))

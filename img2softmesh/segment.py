@@ -1,4 +1,4 @@
-"""Foreground segmentation: image alpha > rembg (optional extra) > GrabCut."""
+"""Foreground segmentation: image alpha > U^2-Net-p (optional extra) > GrabCut."""
 
 from importlib.util import find_spec
 
@@ -21,12 +21,20 @@ def _has_alpha(img):
     return img.shape[2] == 4 and (img[:, :, 3] < 250).mean() > 0.01
 
 
-def _rembg(bgr):
-    from rembg import remove
-    out = np.asarray(remove(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), only_mask=True))
-    if out.ndim == 3:
-        out = out[:, :, -1]
-    return out > 127
+U2NETP = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
+
+
+def _u2netp(bgr):
+    """Salient-object mask from U^2-Net-p (4.7 MB ONNX, ~0.3 s on CPU), pre/post-processed as rembg does."""
+    import onnxruntime as ort
+
+    from .trellis import download, home
+    sess = ort.InferenceSession(download(U2NETP, home() / "u2netp.onnx"), providers=ort.get_available_providers())
+    x = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), (320, 320), interpolation=cv2.INTER_AREA)
+    x = (x / max(x.max(), 1e-6) - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+    p = sess.run(None, {sess.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})[0][0, 0]
+    p = (p - p.min()) / (p.max() - p.min())
+    return cv2.resize(p, bgr.shape[1::-1], interpolation=cv2.INTER_LANCZOS4) > 0.5
 
 
 def _grabcut(bgr):
@@ -65,20 +73,20 @@ def clean_mask(mask):
 def segment(img, method="auto"):
     """Return (bgr, mask) with mask uint8 0/255.
 
-    method: auto | alpha | rembg | grabcut
+    method: auto | alpha | u2net | grabcut
     """
     bgr = np.ascontiguousarray(img[:, :, :3])
     if method == "auto":
-        method = "alpha" if _has_alpha(img) else "rembg" if find_spec("rembg") else "grabcut"
+        method = "alpha" if _has_alpha(img) else "u2net" if find_spec("onnxruntime") else "grabcut"
     match method:
         case "alpha":
             if not _has_alpha(img):
                 raise ValueError("image has no transparency to use as a mask")
             mask = img[:, :, 3] > 127
-        case "rembg":
-            if not find_spec("rembg"):
-                raise ImportError("rembg not installed: pip install 'img2softmesh[rembg]'")
-            mask = _rembg(bgr)
+        case "u2net":
+            if not find_spec("onnxruntime"):
+                raise ImportError("onnxruntime not installed: pip install 'img2softmesh[u2net]'")
+            mask = _u2netp(bgr)
         case "grabcut":
             mask = _grabcut(bgr)
         case _:

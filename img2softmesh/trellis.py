@@ -7,9 +7,9 @@ Binary + ~4 GB of weights are downloaded once into $IMG2SOFTMESH_HOME (default ~
 import hashlib
 import os
 import platform
+import shutil
 import subprocess
 import urllib.request
-import zipfile
 from pathlib import Path
 
 RELEASE = "https://github.com/pwilkin/trellis.cpp/releases/download/v0.8.1"
@@ -22,7 +22,7 @@ def home():
     return Path(os.environ.get("IMG2SOFTMESH_HOME", Path.home() / ".cache" / "img2softmesh"))
 
 
-def _download(url, dest):
+def download(url, dest):
     dest = Path(dest)
     with urllib.request.urlopen(url) as r:
         size = int(r.headers.get("Content-Length", 0))
@@ -31,8 +31,7 @@ def _download(url, dest):
         print(f"downloading {dest.name} ({size / 2**20:.0f} MB)")
         tmp = dest.with_suffix(dest.suffix + ".part")
         with open(tmp, "wb") as fh:
-            while chunk := r.read(1 << 20):
-                fh.write(chunk)
+            shutil.copyfileobj(r, fh, 1 << 20)
     if size and tmp.stat().st_size != size:
         raise OSError(f"truncated download: {dest.name}")
     tmp.replace(dest)
@@ -48,19 +47,14 @@ def ensure(res=512, quant="q4", backend="vulkan"):
     exe = bin_dir / ("trellis-cli.exe" if system == "windows" else "trellis-cli")
     if not exe.exists():
         ext = "zip" if system == "windows" else "tar.gz"
-        archive = _download(f"{RELEASE}/trellis-{backend}-{system}-x64.{ext}", home() / f"trellis-{backend}.{ext}")
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        if ext == "zip":
-            zipfile.ZipFile(archive).extractall(bin_dir)
-        else:
-            import tarfile
-            tarfile.open(archive).extractall(bin_dir, filter="data")
+        archive = download(f"{RELEASE}/trellis-{backend}-{system}-x64.{ext}", home() / f"trellis-{backend}.{ext}")
+        shutil.unpack_archive(archive, bin_dir, filter=None if ext == "zip" else "data")
         exe = next(bin_dir.rglob(exe.name))
         exe.chmod(0o755)
     models = home() / f"trellis2-{quant}"
     models.mkdir(parents=True, exist_ok=True)
     for stage in STAGES[res]:
-        _download(f"{WEIGHTS}/{quant}/{stage}.gguf", models / f"{stage}.gguf")
+        download(f"{WEIGHTS}/{quant}/{stage}.gguf", models / f"{stage}.gguf")
     return exe, models
 
 
